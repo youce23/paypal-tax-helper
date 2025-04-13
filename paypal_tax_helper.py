@@ -158,6 +158,7 @@ def create_merged_report(income_records: list, withdrawal_records: list, output_
     income_df = income_df.rename(
         columns={"入金日": "日付", "USD入金額": "USD金額", "入金時TTM": "TTM", "JPY換算額（雑所得）": "JPY換算額"}
     )
+    income_df["入金時のJPY換算額の累計"] = ""
     income_df["為替損益"] = ""
     income_df["スプレッド"] = ""
     income_df["実際の出金額"] = ""
@@ -170,15 +171,26 @@ def create_merged_report(income_records: list, withdrawal_records: list, output_
             "出金日": "日付",
             "USD出金額": "USD金額",
             "出金TTM": "TTM",
-            "JPY換算入金額（雑所得）": "JPY換算額",
+            "JPY換算入金額（雑所得）": "入金時のJPY換算額の累計",
             "為替損益（雑所得）": "為替損益",
             "スプレッド（経費）": "スプレッド",
             "実際のJPY出金額": "実際の出金額",
         }
     )
+    withdraw_df["JPY換算額"] = ""
 
     # 入出金を統合
-    columns = ["種別", "日付", "USD金額", "TTM", "JPY換算額", "為替損益", "スプレッド", "実際の出金額"]
+    columns = [
+        "種別",
+        "日付",
+        "USD金額",
+        "TTM",
+        "JPY換算額",
+        "入金時のJPY換算額の累計",
+        "為替損益",
+        "スプレッド",
+        "実際の出金額",
+    ]
     combined_df = pd.concat([income_df[columns], withdraw_df[columns]], ignore_index=True)
     combined_df = combined_df.sort_values("日付").reset_index(drop=True)
 
