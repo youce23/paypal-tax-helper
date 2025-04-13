@@ -172,3 +172,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Input/Output files
+/transactions.csv
+/ttm_rates.csv
+/output/
