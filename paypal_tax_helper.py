@@ -64,7 +64,7 @@ def process_income(row, ttm_df: pd.DataFrame, usd_balance: float, accumulated_jp
             "入金日": date,  # 入金日
             "USD入金額": amount,  # 入金額（USD）
             "入金時TTM": ttm,  # 入金時のTTM
-            "JPY換算額（雑所得）": round(jpy_income),  # 入金額をJPY換算した雑所得額
+            "JPY換算額（雑所得）": jpy_income,  # 入金額をJPY換算した雑所得額
         }
     )
 
@@ -120,11 +120,11 @@ def process_withdrawal(
             "出金日": date,
             "USD出金額": usd_balance,
             "出金TTM": ttm_out,
-            "JPY換算入金額（雑所得）": round(accumulated_jpy_income),
-            "為替損益（雑所得）": round(fx_profit),
-            "スプレッド（経費）": round(spread),
+            "JPY換算入金額（雑所得）": accumulated_jpy_income,
+            "為替損益（雑所得）": fx_profit,
+            "スプレッド（経費）": spread,
             "実際のJPY出金額": jpy_out,
-            "JPY評価額（TTM換算）": round(jpy_evaluated),
+            "JPY評価額（TTM換算）": jpy_evaluated,
         }
     )
 
@@ -190,9 +190,9 @@ def create_merged_report(income_records: list, withdrawal_records: list, output_
         elif kind == "出金":
             usd_balance -= usd_amt
 
-        # 残高（USD・JPY換算）を更新。JPY換算値は整数に変換する。
-        combined_df.at[i, "残高（USD）"] = round(usd_balance, 8)
-        combined_df.at[i, "残高（JPY換算）"] = round(usd_balance * ttm)
+        # 残高（USD・JPY換算）を更新
+        combined_df.at[i, "残高（USD）"] = usd_balance
+        combined_df.at[i, "残高（JPY換算）"] = usd_balance * ttm
 
     # 統合データをCSVとして出力
     combined_df.to_csv(output_path, index=False, encoding="utf-8-sig")
