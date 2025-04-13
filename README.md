@@ -88,13 +88,16 @@ USD の入金から JPY の出金までの流れを分析し、以下の 3 項�
 python paypal_tax_helper.py
 ```
 
-3. `output`ディレクトリが作成され、その中に`merged_report.csv`が出力される
+3. `output`ディレクトリが作成され、その中に以下のファイルが出力される
+   - `transaction_report.csv`
+   - `monthly_summary.csv`
+   - `yearly_summary.csv`
 
 ---
 
 ## 📄 出力 CSV（例）
 
-`merged_report.csv` という名前の CSV ファイルが出力され、以下の内容が含まれます:
+### `transaction_report.csv`
 
 | 種別 | 日付       | USD 金額 | TTM    | JPY 換算額 | 為替損益 | スプレッド | 実際の出金額 | 残高（USD） | 残高（JPY 換算） |
 | ---- | ---------- | -------- | ------ | ---------- | -------- | ---------- | ------------ | ----------- | ---------------- |
@@ -116,3 +119,11 @@ python paypal_tax_helper.py
 - **実際の出金額**: 実際の出金額（JPY）。
 - **残高（USD）**: 取引後の USD 残高。
 - **残高（JPY 換算）**: 取引後の JPY 換算残高（USD 残高 × TTM）。
+
+### `monthly_summary.csv`
+
+`transaction_report.csv`を月次で集計したレポート
+
+### `yearly_summary.csv`
+
+`transaction_report.csv`を年次で集計したレポート

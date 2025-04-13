@@ -1,21 +1,24 @@
 import os
+from pathlib import Path
 
 import pandas as pd
 
 
 # === TTMデータの読み込み・前処理 ===
-def load_ttm(ttm_file: str) -> pd.DataFrame:
+def load_ttm(ttm_file: Path) -> pd.DataFrame:
     """TTM（為替レート）CSVを読み込み、日付・欠損値を整形"""
     df = pd.read_csv(ttm_file)
-    df = df[df["日付"].apply(is_valid_date)].copy()
+
+    df = df[df["日付"].apply(_is_valid_date)].copy()
     df["日付"] = pd.to_datetime(df["日付"])
     df["TTM"] = pd.to_numeric(df["TTM"], errors="coerce")
     df = df.sort_values("日付")
     df["TTM"] = df["TTM"].ffill()
+
     return df.set_index("日付")
 
 
-def is_valid_date(date_str: str) -> bool:
+def _is_valid_date(date_str: str) -> bool:
     """日付形式であるか確認するヘルパー関数"""
     try:
         pd.to_datetime(date_str)
@@ -25,11 +28,13 @@ def is_valid_date(date_str: str) -> bool:
 
 
 # === 取引データの読み込み ===
-def load_transactions(file_path: str) -> pd.DataFrame:
+def load_transactions(file_path: Path) -> pd.DataFrame:
     """取引CSVを読み込み、日付・金額形式を整形"""
     df = pd.read_csv(file_path)
+
     df["日付"] = pd.to_datetime(df["日付"])
     df["正味"] = df["正味"].astype(str).str.replace(",", "").astype(float)
+
     return df
 
 
@@ -136,7 +141,7 @@ def process_withdrawal(
 
 
 # === 統合レポートの作成（入出金＋残高） ===
-def create_merged_report(income_records: list, withdrawal_records: list, output_path: str) -> None:
+def create_merged_report(income_records: list, withdrawal_records: list, output_path: Path) -> None:
     """入金・出金データを統合し、残高列を付加したCSVを出力
 
     入金と出金のレコードを統合し、各トランザクションの残高（USDおよびJPY換算）を計算して、
@@ -145,7 +150,7 @@ def create_merged_report(income_records: list, withdrawal_records: list, output_
     Args:
         income_records (list): 入金トランザクションのリスト
         withdrawal_records (list): 出金トランザクションのリスト
-        output_path (str): 統合されたレポートを保存するCSVファイルのパス
+        output_path (Path): 統合されたレポートを保存するCSVファイルのパス
     """
     # 入金データの整形
     income_df = pd.DataFrame(income_records)
@@ -199,18 +204,149 @@ def create_merged_report(income_records: list, withdrawal_records: list, output_
     print(f"✅ 統合レポート作成完了 → {output_path}")
 
 
+# === 期間別サマリの作成 ===
+def _compute_common_summary(income_records: list, withdrawal_records: list, group_keys: list) -> pd.DataFrame:
+    # 入金データの整形
+    income_df = pd.DataFrame(income_records)
+    income_df["種別"] = "入金"
+    income_df = income_df.rename(
+        columns={
+            "入金日": "日付",
+            "USD入金額": "USD金額",
+            "入金時TTM": "TTM",
+            "JPY換算額（雑所得）": "JPY換算額",
+        }
+    )
+    income_df["為替損益"] = 0.0
+    income_df["スプレッド"] = 0.0
+    income_df["実際の出金額"] = 0.0
+
+    # 出金データの整形
+    withdraw_df = pd.DataFrame(withdrawal_records)
+    withdraw_df["種別"] = "出金"
+    withdraw_df = withdraw_df.rename(
+        columns={
+            "出金日": "日付",
+            "USD出金額": "USD金額",
+            "出金TTM": "TTM",
+            "JPY換算入金額（雑所得）": "JPY換算額",
+            "為替損益（雑所得）": "為替損益",
+            "スプレッド（経費）": "スプレッド",
+            "実際のJPY出金額": "実際の出金額",
+        }
+    )
+
+    # 入出金データを結合
+    combined = pd.concat([income_df, withdraw_df], ignore_index=True)
+    combined["日付"] = pd.to_datetime(combined["日付"], errors="coerce")
+    combined["年"] = combined["日付"].dt.year
+    if "月" in group_keys:
+        combined["月"] = combined["日付"].dt.month
+
+    # 数値型への変換（計算時のエラー回避）
+    for col in ["USD金額", "JPY換算額", "為替損益", "実際の出金額", "スプレッド"]:
+        combined[col] = pd.to_numeric(combined[col], errors="coerce").fillna(0)
+
+    summary = (
+        combined.groupby(group_keys)
+        .apply(
+            lambda group: pd.Series(
+                {
+                    "(A) 入金額 (USD)": group.loc[group["種別"] == "入金", "USD金額"].sum(),
+                    "(B) 入金額 (JPY換算額)": group.loc[group["種別"] == "入金", "JPY換算額"].sum(),
+                    "(C) 為替損益": group.loc[group["種別"] == "出金", "為替損益"].sum(),
+                    "(D) 実際の出金額 (JPY)": group.loc[group["種別"] == "出金", "実際の出金額"].sum(),
+                    "(E) スプレッド": group.loc[group["種別"] == "出金", "スプレッド"].sum(),
+                }
+            ),
+            include_groups=False,
+        )
+        .reset_index()
+    )
+    summary["雑所得 (B+C)"] = summary["(B) 入金額 (JPY換算額)"] + summary["(C) 為替損益"]
+    summary["経費 (E)"] = summary["(E) スプレッド"]
+    return summary
+
+
+def create_monthly_summary(income_records: list, withdrawal_records: list, output_path: Path) -> None:
+    """
+    月次サマリをCSV出力
+
+    サマリの各列は以下の通り
+    - 年
+    - 月
+    - (A) 入金額 (USD)       : 入金データのUSD金額の合計
+    - (B) 入金額 (JPY換算額) : 入金データのJPY換算額の合計
+    - (C) 為替損益           : 出金データの為替損益の合計
+    - (D) 実際の出金額 (JPY) : 出金データの実際の出金額の合計
+    - (E) スプレッド         : 出金データのスプレッドの合計
+    - 雑所得 (B+C)           : (B) + (C)
+    - 経費 (E)               : (E)と同じ
+
+    Args:
+        income_records (list): 入金トランザクションのリスト
+        withdrawal_records (list): 出金トランザクションのリスト
+        output_path (Path): 統合されたレポートを保存するCSVファイルのパス
+    """
+    summary = _compute_common_summary(income_records, withdrawal_records, ["年", "月"])
+    summary = summary[
+        [
+            "年",
+            "月",
+            "(A) 入金額 (USD)",
+            "(B) 入金額 (JPY換算額)",
+            "(C) 為替損益",
+            "(D) 実際の出金額 (JPY)",
+            "(E) スプレッド",
+            "雑所得 (B+C)",
+            "経費 (E)",
+        ]
+    ]
+    summary.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"✅ 月次サマリ作成完了 → {output_path}")
+
+
+def create_yearly_summary(income_records: list, withdrawal_records: list, output_path: Path) -> None:
+    """
+    年次サマリをCSV出力
+
+    create_monthly_summary関数を参照
+    """
+    summary = _compute_common_summary(income_records, withdrawal_records, ["年"])
+    summary = summary[
+        [
+            "年",
+            "(A) 入金額 (USD)",
+            "(B) 入金額 (JPY換算額)",
+            "(C) 為替損益",
+            "(D) 実際の出金額 (JPY)",
+            "(E) スプレッド",
+            "雑所得 (B+C)",
+            "経費 (E)",
+        ]
+    ]
+    summary.to_csv(output_path, index=False, encoding="utf-8-sig")
+    print(f"✅ 年次サマリ作成完了 → {output_path}")
+
+
 # === メイン処理 ===
 def main() -> None:
 
     # ファイル設定
-    transactions_file = "transactions.csv"
-    ttm_file = "ttm_rates.csv"
+    transactions_file = Path("transactions.csv")
+    ttm_file = Path("ttm_rates.csv")
 
-    output_dir = "output"
+    output_dir = Path("output")
+    work_dir = output_dir / "work"
     os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, "tax_report.csv")
-    income_detail_file = os.path.join(output_dir, "income_details.csv")
-    merged_report_file = os.path.join(output_dir, "merged_report.csv")
+    os.makedirs(work_dir, exist_ok=True)
+
+    withdrawal_detail_file = work_dir / "withdrawal_details.csv"
+    income_detail_file = work_dir / "income_details.csv"
+
+    transaction_report_file = output_dir / "transaction_report.csv"
+    monthly_summary_file = output_dir / "monthly_summary.csv"
+    yearly_summary_file = output_dir / "yearly_summary.csv"
 
     # データ読み込み
     ttm_df = load_ttm(ttm_file)
@@ -234,15 +370,19 @@ def main() -> None:
             )
 
     # レポート出力
-    pd.DataFrame(withdrawal_records).to_csv(output_file, index=False, encoding="utf-8-sig")
+    pd.DataFrame(withdrawal_records).to_csv(withdrawal_detail_file, index=False, encoding="utf-8-sig")
     pd.DataFrame(income_records).to_csv(income_detail_file, index=False, encoding="utf-8-sig")
 
     print("処理完了 ✅")
-    print(f"→ 出金レポート: {output_file}")
+    print(f"→ 出金レポート: {withdrawal_detail_file}")
     print(f"→ 入金明細レポート: {income_detail_file}")
 
     # 統合レポート作成
-    create_merged_report(income_records, withdrawal_records, merged_report_file)
+    create_merged_report(income_records, withdrawal_records, transaction_report_file)
+
+    # サマリ作成
+    create_monthly_summary(income_records, withdrawal_records, monthly_summary_file)
+    create_yearly_summary(income_records, withdrawal_records, yearly_summary_file)
 
 
 # 実行エントリーポイント
