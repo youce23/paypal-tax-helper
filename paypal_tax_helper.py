@@ -370,8 +370,8 @@ def main() -> None:
     withdrawal_records = []
     income_records = []
 
-    # 日付順でトランザクションを処理
-    for _, row in df.sort_values("日付").iterrows():
+    # 記載順にトランザクションを処理
+    for _, row in df.iterrows():
         if row["通貨"] == "USD" and row["残高への影響"] == "入金":
             usd_balance, accumulated_jpy_income = process_income(
                 row, ttm_df, usd_balance, accumulated_jpy_income, income_records
